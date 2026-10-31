@@ -14,6 +14,8 @@ import {
   LayoutGrid,
   LoaderPinwheel,
   Move,
+  Pause,
+  Play,
   PaintBucket,
   Pencil,
   Pipette,
@@ -21,6 +23,8 @@ import {
   Save,
   SquareSplitHorizontal,
   SquareSplitVertical,
+  StepBack,
+  StepForward,
   SquareDashed,
   Undo2,
   type LucideIcon,
@@ -30,6 +34,7 @@ import { ColorPicker } from "@/components/ColorPicker";
 import { PalettePanel } from "@/components/PalettePanel";
 import { SpriteSheetDialog } from "@/components/SpriteSheetDialog";
 import { ONION_NEXT, ONION_PREV, Timeline } from "@/components/Timeline";
+import { animFrame, type LoopMode } from "@/lib/anim";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { WindowControls, dragWindow } from "@/components/WindowControls";
@@ -87,6 +92,12 @@ const SYMMETRIES: { id: Symmetry; label: string; icon: LucideIcon }[] = [
   { id: "radial", label: "Simetria radial (4 giros de 90°)", icon: LoaderPinwheel },
 ];
 
+const LOOPS: { id: LoopMode; label: string }[] = [
+  { id: "loop", label: "Repetir" },
+  { id: "pingpong", label: "Vai e volta" },
+  { id: "once", label: "Uma vez" },
+];
+
 const SIZES = [8, 16, 32, 64];
 const HISTORY_MAX = 100;
 // ponytail: whole-image snapshots per stroke and a full redraw per change, fine up to 256x256
@@ -122,7 +133,10 @@ export default function App() {
   const onionCanvases = useRef(new Map<number, HTMLCanvasElement>());
   const [playing, setPlaying] = useState(false);
   const [fps, setFps] = useState(8);
-  const [playIndex, setPlayIndex] = useState(0);
+  const [loop, setLoop] = useState<LoopMode>("loop");
+  // Playback clock: ticks since play started; animFrame turns it into a frame index
+  const [playT, setPlayT] = useState(0);
+  const playedFrame = animFrame(playT, frames.current.length, loop);
   const [zoom, setZoom] = useState(() => fitZoom(img.current));
   const [tool, setTool] = useState<Tool>("pencil");
   const [color, setColor] = useState("#1a1626");
@@ -159,7 +173,7 @@ export default function App() {
     const data = toImageData(img.current);
     for (const c of [canvas.current, ...tiles.current]) c?.getContext("2d")!.putImageData(data, 0, 0);
     // While playing, the preview cycles through the frames
-    const shown = playing ? frames.current[playIndex % frames.current.length] : img.current;
+    const shown = playing ? frames.current[playedFrame] : img.current;
     for (const c of [preview.current, previewBig.current]) c?.getContext("2d")!.putImageData(toImageData(shown), 0, 0);
     for (const [offset, c] of onionCanvases.current) {
       const f = frames.current[frameRef.current + offset];
@@ -169,9 +183,28 @@ export default function App() {
 
   useEffect(() => {
     if (!playing) return;
-    const id = setInterval(() => setPlayIndex((i) => i + 1), 1000 / fps);
+    const id = setInterval(() => setPlayT((t) => t + 1), 1000 / fps);
     return () => clearInterval(id);
   }, [playing, fps]);
+
+  // "Uma vez" stops on the last frame
+  useEffect(() => {
+    if (playing && loop === "once" && playT >= frames.current.length - 1) pause();
+  }, [playing, loop, playT]);
+
+  /** Stops on the frame the preview was showing, so the editor lands there */
+  function pause() {
+    setPlaying(false);
+    showFrame(playedFrame);
+  }
+
+  function togglePlay() {
+    if (playing) return pause();
+    const n = frames.current.length;
+    // start from the frame being edited; "Uma vez" already at the end starts over
+    setPlayT(loop === "once" && frameRef.current === n - 1 ? 0 : frameRef.current);
+    setPlaying(true);
+  }
 
   /** Replaces the image of the current frame */
   function setImg(next: Img) {
@@ -225,7 +258,11 @@ export default function App() {
     showFrame(Math.min(frameRef.current, frames.current.length - 1));
   }
 
-  const stepFrame = (d: number) => showFrame((frameRef.current + d + frames.current.length) % frames.current.length);
+  /** Frame by frame: pauses first, then moves one frame (wrapping around) */
+  function stepFrame(d: number) {
+    if (playing) pause();
+    showFrame((frameRef.current + d + frames.current.length) % frames.current.length);
+  }
   const undo = () => step(past.current, future.current);
   /** What move, flip and delete act on: the selection, or the whole image when nothing is selected */
   const area = () => (sel && clampRect(sel, img.current)) ?? full(img.current);
@@ -444,7 +481,7 @@ export default function App() {
     if (k === "o") return setOnion((o) => !o);
     if (k === ",") return stepFrame(-1);
     if (k === ".") return stepFrame(1);
-    if (e.key === "Enter") return setPlaying((p) => !p);
+    if (e.key === "Enter") return togglePlay();
     if (k === "s") return cycleSymmetry();
     const t = TOOLS.find((t) => t.key === k);
     if (t) setTool(t.id);
@@ -647,7 +684,12 @@ export default function App() {
 
         <aside className="flex w-64 shrink-0 flex-col gap-5 overflow-y-auto border-l p-3">
           <section className="flex flex-col gap-2">
-            <h2 className="text-xs font-medium text-muted-foreground">Prévia</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-medium text-muted-foreground">Prévia</h2>
+              <span className="font-mono text-xs text-muted-foreground">
+                {(playing ? playedFrame : frame) + 1}/{frames.current.length}
+              </span>
+            </div>
             {/* Blue-gray background: shows if the sprite still reads at real size */}
             <div className="flex items-end gap-3 rounded-md bg-[#78a0c8] p-3">
               <canvas ref={preview} width={w} height={h} className="[image-rendering:pixelated]" />
@@ -658,6 +700,48 @@ export default function App() {
                 className="[image-rendering:pixelated]"
                 style={{ width: w * bigScale, height: h * bigScale }}
               />
+            </div>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="icon-sm" title="Frame anterior (,)" aria-label="Frame anterior" onClick={() => stepFrame(-1)}>
+                <StepBack />
+              </Button>
+              <Button
+                variant={playing ? "default" : "outline"}
+                size="icon-sm"
+                title={playing ? "Pausar (Enter)" : "Tocar (Enter)"}
+                aria-label={playing ? "Pausar" : "Tocar"}
+                onClick={togglePlay}
+              >
+                {playing ? <Pause /> : <Play />}
+              </Button>
+              <Button variant="ghost" size="icon-sm" title="Próximo frame (.)" aria-label="Próximo frame" onClick={() => stepFrame(1)}>
+                <StepForward />
+              </Button>
+              <label className="ml-auto flex items-center gap-1 text-xs text-muted-foreground" title="Quadros por segundo">
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  value={fps}
+                  onChange={(e) => setFps(Math.min(60, Math.max(1, Math.floor(Number(e.target.value) || 1))))}
+                  className="h-7 w-11 rounded-md border bg-background px-1.5 text-sm text-foreground"
+                />
+                fps
+              </label>
+            </div>
+            <div className="flex gap-1" role="group" aria-label="Repetição">
+              {LOOPS.map((l) => (
+                <Button
+                  key={l.id}
+                  variant={loop === l.id ? "secondary" : "ghost"}
+                  size="xs"
+                  className="flex-1"
+                  aria-pressed={loop === l.id}
+                  onClick={() => setLoop(l.id)}
+                >
+                  {l.label}
+                </Button>
+              ))}
             </div>
           </section>
 
@@ -690,10 +774,6 @@ export default function App() {
         onToggleOnion={() => setOnion((o) => !o)}
         onionRange={onionRange}
         onOnionRange={setOnionRange}
-        playing={playing}
-        onTogglePlay={() => setPlaying((p) => !p)}
-        fps={fps}
-        onFps={setFps}
       />
 
       <footer className="flex h-6 shrink-0 items-center gap-3 border-t px-3 font-mono text-xs text-muted-foreground">

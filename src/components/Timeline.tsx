@@ -1,4 +1,4 @@
-import { Copy, Layers, Pause, Play, Plus, Trash2 } from "lucide-react";
+import { Copy, Layers, Plus, Trash2 } from "lucide-react";
 import { Thumb } from "@/components/Thumb";
 import { Button } from "@/components/ui/button";
 import type { Img } from "@/lib/pixels";
@@ -20,41 +20,12 @@ type Props = {
   onToggleOnion: () => void;
   onionRange: number;
   onOnionRange: (n: number) => void;
-  playing: boolean;
-  onTogglePlay: () => void;
-  fps: number;
-  onFps: (n: number) => void;
 };
 
-/** Frame strip under the canvas: play, frames, add/duplicate/delete, onion skin */
+/** Frame strip under the canvas: frames, add/duplicate/delete, onion skin. Playback lives in the preview. */
 export function Timeline(p: Props) {
   return (
     <div className="flex h-16 shrink-0 items-center gap-3 border-t px-3">
-      <div className="flex items-center gap-1.5">
-        <Button
-          variant={p.playing ? "default" : "outline"}
-          size="icon-sm"
-          title={p.playing ? "Pausar (Enter)" : "Tocar na prévia (Enter)"}
-          aria-label={p.playing ? "Pausar" : "Tocar"}
-          onClick={p.onTogglePlay}
-        >
-          {p.playing ? <Pause /> : <Play />}
-        </Button>
-        <label className="flex items-center gap-1 text-xs text-muted-foreground" title="Quadros por segundo">
-          <input
-            type="number"
-            min={1}
-            max={60}
-            value={p.fps}
-            onChange={(e) => p.onFps(Math.min(60, Math.max(1, Math.floor(Number(e.target.value) || 1))))}
-            className="h-7 w-12 rounded-md border bg-background px-1.5 text-sm text-foreground"
-          />
-          fps
-        </label>
-      </div>
-
-      <div className="h-8 w-px bg-border" />
-
       <ol className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto py-1">
         {p.frames.map((f, i) => (
           <li key={i}>
