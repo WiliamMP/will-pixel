@@ -10,6 +10,7 @@ import {
   getPixel,
   hexToRgba,
   line,
+  mirrorPoints,
   moveRect,
   rectBetween,
   rgbaToHex,
@@ -62,6 +63,15 @@ assert.deepEqual(getPixel(row, 2, 0), red);
 assert.deepEqual(getPixel(row, 0, 0), [0, 0, 0, 0]);
 flip(row, full(row), false);
 assert.deepEqual(getPixel(row, 2, 1), red);
+
+// symmetry: mirrors land on the opposite side; radial gives the 4 quarter turns
+assert.deepEqual(mirrorPoints(1, 2, 16, 16, "h"), [[1, 2], [14, 2]]);
+assert.deepEqual(mirrorPoints(1, 2, 16, 16, "v"), [[1, 2], [1, 13]]);
+assert.deepEqual(mirrorPoints(1, 2, 16, 16, "both").length, 4);
+assert.deepEqual(mirrorPoints(0, 0, 16, 16, "radial"), [[0, 0], [15, 0], [15, 15], [0, 15]]);
+assert.deepEqual(mirrorPoints(4, 1, 8, 8, "radial"), [[4, 1], [6, 4], [3, 6], [1, 3]]);
+assert.deepEqual(mirrorPoints(3, 3, 7, 7, "radial"), [[3, 3], [3, 3], [3, 3], [3, 3]]); // the center pixel
+assert.deepEqual(mirrorPoints(5, 5, 16, 16, "off"), [[5, 5]]);
 
 assert.deepEqual(rectBetween(3, 1, 1, 2), { x: 1, y: 1, w: 3, h: 2 });
 assert.deepEqual(clampRect({ x: -1, y: 2, w: 3, h: 5 }, row), null);

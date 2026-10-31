@@ -9,13 +9,17 @@ import {
   FlipVertical2,
   FolderOpen,
   Grid3x3,
+  Grid2x2,
   LayoutGrid,
+  LoaderPinwheel,
   Move,
   PaintBucket,
   Pencil,
   Pipette,
   Redo2,
   Save,
+  SquareSplitHorizontal,
+  SquareSplitVertical,
   SquareDashed,
   Undo2,
   type LucideIcon,
@@ -43,6 +47,7 @@ import {
   hexToRgba,
   inside,
   line,
+  mirrorPoints,
   moveRect,
   rectBetween,
   rgbaToHex,
@@ -50,6 +55,7 @@ import {
   type Img,
   type Rect,
   type RGBA,
+  type Symmetry,
 } from "@/lib/pixels";
 
 type Tool = "pencil" | "eraser" | "fill" | "picker" | "select" | "move";
@@ -68,6 +74,15 @@ const ARROWS: Record<string, [number, number]> = {
   ArrowUp: [0, -1],
   ArrowDown: [0, 1],
 };
+
+// The symmetry button cycles through these, in this order
+const SYMMETRIES: { id: Symmetry; label: string; icon: LucideIcon }[] = [
+  { id: "off", label: "Simetria desligada", icon: SquareSplitHorizontal },
+  { id: "h", label: "Simetria esquerda e direita", icon: SquareSplitHorizontal },
+  { id: "v", label: "Simetria cima e baixo", icon: SquareSplitVertical },
+  { id: "both", label: "Simetria nos 4 lados", icon: Grid2x2 },
+  { id: "radial", label: "Simetria radial (4 giros de 90°)", icon: LoaderPinwheel },
+];
 
 const SIZES = [8, 16, 32, 64];
 const HISTORY_MAX = 100;
@@ -89,6 +104,8 @@ export default function App() {
   // Texture mode: the drawing repeated 3x3 around the editable center, seams marked
   const [tile, setTile] = useState(false);
   const tiles = useRef<(HTMLCanvasElement | null)[]>([]);
+  const [symmetry, setSymmetry] = useState<Symmetry>("off");
+  const sym = SYMMETRIES.find((m) => m.id === symmetry)!;
   const [path, setPath] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [cursor, setCursor] = useState("");
@@ -146,6 +163,18 @@ export default function App() {
     ];
   }
 
+  const mirrored = (x: number, y: number) => mirrorPoints(x, y, img.current.w, img.current.h, symmetry);
+
+  /** Pencil and eraser: one pixel plus its symmetric copies */
+  function paint(x: number, y: number, c: RGBA) {
+    for (const [px, py] of mirrored(x, y)) setPixel(img.current, px, py, c);
+  }
+
+  function cycleSymmetry() {
+    const i = SYMMETRIES.findIndex((m) => m.id === symmetry);
+    setSymmetry(SYMMETRIES[(i + 1) % SYMMETRIES.length].id);
+  }
+
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     if (e.button !== 0 && e.button !== 2) return;
     const [x, y] = pixelAt(e);
@@ -173,9 +202,9 @@ export default function App() {
       return;
     }
     const c = t === "eraser" ? CLEAR : hexToRgba(color);
-    if (t === "fill") fill(img.current, x, y, c);
+    if (t === "fill") for (const [px, py] of mirrored(x, y)) fill(img.current, px, py, c);
     else {
-      setPixel(img.current, x, y, c);
+      paint(x, y, c);
       stroke.current = { x, y, c };
       e.currentTarget.setPointerCapture(e.pointerId);
     }
@@ -203,7 +232,7 @@ export default function App() {
     }
     const s = stroke.current;
     if (!s || (s.x === x && s.y === y)) return;
-    for (const [px, py] of line(s.x, s.y, x, y)) setPixel(img.current, px, py, s.c);
+    for (const [px, py] of line(s.x, s.y, x, y)) paint(px, py, s.c);
     s.x = x;
     s.y = y;
     redraw();
@@ -330,6 +359,7 @@ export default function App() {
     }
     if (e.shiftKey && (k === "h" || k === "v")) return flipArea(k === "h");
     if (k === "t") return toggleTile();
+    if (k === "s") return cycleSymmetry();
     const t = TOOLS.find((t) => t.key === k);
     if (t) setTool(t.id);
   };
@@ -435,6 +465,9 @@ export default function App() {
           <ToolButton label="Modo textura: repete 3x3 e marca as emendas (T)" active={tile} onClick={toggleTile}>
             <LayoutGrid />
           </ToolButton>
+          <ToolButton label={`${sym.label} · clique troca (S)`} active={symmetry !== "off"} onClick={cycleSymmetry}>
+            <sym.icon />
+          </ToolButton>
         </aside>
 
         <main
@@ -482,6 +515,13 @@ export default function App() {
               />
             )}
             {/* Seams: red bars on both sides of each edge pixel that doesn't continue on the other side */}
+            {/* Symmetry axes: what is drawn on one side is copied across these lines */}
+            {(symmetry === "h" || symmetry === "both" || symmetry === "radial") && (
+              <div className="pointer-events-none absolute inset-y-0 border-l border-dashed border-primary" style={{ left: (w * zoom) / 2 }} />
+            )}
+            {(symmetry === "v" || symmetry === "both" || symmetry === "radial") && (
+              <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-primary" style={{ top: (h * zoom) / 2 }} />
+            )}
             {report?.rows.flatMap((y) =>
               [-3, w * zoom].map((left) => (
                 <div key={`r${y}${left}`} className="pointer-events-none absolute w-[3px] bg-destructive" style={{ left, top: y * zoom, height: zoom }} />
@@ -542,6 +582,7 @@ export default function App() {
             seleção {sel.w}x{sel.h}
           </span>
         )}
+        {symmetry !== "off" && <span>{sym.label.toLowerCase()}</span>}
       </footer>
       <Toaster position="bottom-center" richColors />
     </div>

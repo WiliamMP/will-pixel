@@ -63,6 +63,29 @@ export function fill(img: Img, x: number, y: number, c: RGBA) {
   }
 }
 
+/** Symmetry while drawing: h = left/right mirror, v = top/bottom, both = 4 quadrants, radial = 4 rotations of 90° */
+export type Symmetry = "off" | "h" | "v" | "both" | "radial";
+
+/** A pixel plus its symmetric copies in a w x h image (duplicates when the pixel sits on an axis) */
+export function mirrorPoints(x: number, y: number, w: number, h: number, mode: Symmetry): [number, number][] {
+  const mx = w - 1 - x;
+  const my = h - 1 - y;
+  if (mode === "h") return [[x, y], [mx, y]];
+  if (mode === "v") return [[x, y], [x, my]];
+  if (mode === "both") return [[x, y], [mx, y], [x, my], [mx, my]];
+  if (mode === "radial") {
+    // offsets from the center, doubled so a center between pixels stays an integer
+    const dx = 2 * x - (w - 1);
+    const dy = 2 * y - (h - 1);
+    const rotations: [number, number][] = [[dx, dy], [-dy, dx], [-dx, -dy], [dy, -dx]];
+    // on a non-square image some rotations fall between pixels: skip those
+    return rotations
+      .map(([rx, ry]): [number, number] => [(rx + w - 1) / 2, (ry + h - 1) / 2])
+      .filter(([px, py]) => Number.isInteger(px) && Number.isInteger(py));
+  }
+  return [[x, y]];
+}
+
 export type Rect = { x: number; y: number; w: number; h: number };
 
 export const full = (img: Img): Rect => ({ x: 0, y: 0, w: img.w, h: img.h });
