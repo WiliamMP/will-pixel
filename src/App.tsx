@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import {
   Brush,
+  Compass,
   Eraser,
   FlipHorizontal2,
   FlipVertical2,
@@ -32,6 +33,7 @@ import {
 import { toast } from "sonner";
 import { ColorPicker } from "@/components/ColorPicker";
 import { PalettePanel } from "@/components/PalettePanel";
+import { DirectionsDialog } from "@/components/DirectionsDialog";
 import { SpriteSheetDialog } from "@/components/SpriteSheetDialog";
 import { ONION_NEXT, ONION_PREV, Timeline } from "@/components/Timeline";
 import { animFrame, type LoopMode } from "@/lib/anim";
@@ -145,7 +147,8 @@ export default function App() {
   const [tile, setTile] = useState(false);
   const tiles = useRef<(HTMLCanvasElement | null)[]>([]);
   const [symmetry, setSymmetry] = useState<Symmetry>("off");
-  const [sheetOpen, setSheetOpen] = useState(false);
+  // The dialog on top of the editor, if any
+  const [dialog, setDialog] = useState<"sheet" | "directions" | null>(null);
   const sym = SYMMETRIES.find((m) => m.id === symmetry)!;
   const [path, setPath] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -441,8 +444,8 @@ export default function App() {
   // Shortcuts read the latest state through this ref, the listener is added once
   const onKey = useRef<(e: KeyboardEvent) => void>(null);
   onKey.current = (e) => {
-    // The sprite sheet dialog is on top: only Esc (close) goes through, so Delete/Ctrl+Z don't touch the drawing
-    if (sheetOpen) return e.key === "Escape" && setSheetOpen(false);
+    // A dialog is on top: only Esc (close) goes through, so Delete/Ctrl+Z don't touch the drawing
+    if (dialog) return e.key === "Escape" && setDialog(null);
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     const k = e.key.toLowerCase();
     if (e.ctrlKey) {
@@ -501,6 +504,10 @@ export default function App() {
     };
   }, []);
 
+  // What the sheet dialogs take from the editor: copies, so later drawing doesn't change them
+  const currentSprite = () => ({ name: path ? path.split(/[\\/]/).pop()!.replace(/\.png$/i, "") : "desenho", img: clone(img.current) });
+  const allFrames = () => frames.current.map((f, i) => ({ name: `frame ${i + 1}`, img: clone(f) }));
+
   const { w, h } = img.current;
   // Neighbor frames that exist, nearest first: -1, 1, -2, 2...
   const onionOffsets = Array.from({ length: onionRange }, (_, i) => [-(i + 1), i + 1])
@@ -548,9 +555,13 @@ export default function App() {
             </option>
           ))}
         </select>
-        <Button variant="ghost" size="sm" title="Juntar vários sprites numa spritesheet" onClick={() => setSheetOpen(true)}>
+        <Button variant="ghost" size="sm" title="Juntar vários sprites numa spritesheet" onClick={() => setDialog("sheet")}>
           <Images />
           Spritesheet
+        </Button>
+        <Button variant="ghost" size="sm" title="Organizar as direções norte, sul, leste e oeste" onClick={() => setDialog("directions")}>
+          <Compass />
+          Direções
         </Button>
         <Button variant="ghost" size="sm" title="Abrir (Ctrl+O)" onClick={openFile}>
           <FolderOpen />
@@ -792,12 +803,8 @@ export default function App() {
         )}
         {symmetry !== "off" && <span>{sym.label.toLowerCase()}</span>}
       </footer>
-      <SpriteSheetDialog
-        open={sheetOpen}
-        current={() => ({ name: path ? path.split(/[\\/]/).pop()!.replace(/\.png$/i, "") : "desenho", img: clone(img.current) })}
-        allFrames={() => frames.current.map((f, i) => ({ name: `frame ${i + 1}`, img: clone(f) }))}
-        onClose={() => setSheetOpen(false)}
-      />
+      <SpriteSheetDialog open={dialog === "sheet"} current={currentSprite} allFrames={allFrames} onClose={() => setDialog(null)} />
+      <DirectionsDialog open={dialog === "directions"} current={currentSprite} allFrames={allFrames} onClose={() => setDialog(null)} />
       <Toaster position="bottom-center" richColors />
     </div>
   );

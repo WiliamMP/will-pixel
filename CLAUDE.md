@@ -11,6 +11,7 @@ O dono vem do **Delphi** e está aprendendo Rust e React: ao explicar código no
 - `src/components/ColorPicker.tsx`: seletor HSV em círculo ou anel + triângulo, desenhado pixel a pixel num canvas.
 - `src/components/PalettePanel.tsx`: variações e gerenciador de paletas (várias paletas salvas no localStorage).
 - `src/lib/sheet.ts` + `src/components/SpriteSheetDialog.tsx`: gerador de spritesheet (grade de células do tamanho do maior sprite, PNG + JSON).
+- `src/lib/directions.ts` + `src/components/DirectionsDialog.tsx`: 4 direções numa folha (uma linha por direção, pés alinhados). `src/lib/files.ts` e `src/components/dialogParts.tsx`: importar/exportar PNG e a casca dos diálogos, usados pelos dois.
 - `src/App.tsx`: a tela inteira. Os frames vivem num `useRef` (`img.current` = frame atual) e são repintados a cada render; histórico = cópia do frame por traço, com o número do frame. `src/components/Timeline.tsx`: faixa de frames, play e onion skin.
 - `src-tauri/src/lib.rs`: `read_file` / `write_file` (bytes do PNG) e `close_splash`. Os caminhos vêm do plugin dialog. **Comando novo precisa entrar no `generate_handler!`.**
 - `src/lib/splash.ts` + `splashscreen.html` + `src/splash.ts`: janela de splash.
