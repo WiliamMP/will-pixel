@@ -7,6 +7,7 @@ import {
   Eraser,
   FolderOpen,
   Grid3x3,
+  Move,
   PaintBucket,
   Pencil,
   Pipette,
@@ -33,18 +34,26 @@ import {
   line,
   rgbaToHex,
   setPixel,
+  shift,
   type Img,
   type RGBA,
 } from "@/lib/pixels";
 
-type Tool = "pencil" | "eraser" | "fill" | "picker";
+type Tool = "pencil" | "eraser" | "fill" | "picker" | "move";
 
 const TOOLS: { id: Tool; key: string; label: string; icon: LucideIcon }[] = [
   { id: "pencil", key: "b", label: "Lápis", icon: Pencil },
   { id: "eraser", key: "e", label: "Borracha", icon: Eraser },
   { id: "fill", key: "g", label: "Balde", icon: PaintBucket },
   { id: "picker", key: "i", label: "Conta-gotas", icon: Pipette },
+  { id: "move", key: "v", label: "Mover · setas movem 1px", icon: Move },
 ];
+const ARROWS: Record<string, [number, number]> = {
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+};
 
 const SIZES = [8, 16, 32, 64];
 // Starting palette: the colors of the first sprites (Sword1, Sword2, Character_Base)
@@ -117,6 +126,9 @@ export default function App() {
   const future = useRef<Img[]>([]);
   // The stroke in progress: last pixel painted and its color
   const stroke = useRef<{ x: number; y: number; c: RGBA } | null>(null);
+  // The move in progress: image before the drag and the pixel where it started.
+  // Moving from `base` each time means pixels dragged off the edge come back if dragged back.
+  const drag = useRef<{ base: Img; x: number; y: number } | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const preview = useRef<HTMLCanvasElement>(null);
   const previewBig = useRef<HTMLCanvasElement>(null);
@@ -171,6 +183,11 @@ export default function App() {
       return;
     }
     checkpoint();
+    if (t === "move") {
+      drag.current = { base: clone(img.current), x, y };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
     const c = t === "eraser" ? CLEAR : hexToRgba(color);
     if (t === "fill") fill(img.current, x, y, c);
     else {
@@ -184,6 +201,12 @@ export default function App() {
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
     const [x, y] = pixelAt(e);
     setCursor(inside(img.current, x, y) ? `${x}, ${y}` : "");
+    const d = drag.current;
+    if (d) {
+      img.current = shift(d.base, x - d.x, y - d.y);
+      redraw();
+      return;
+    }
     const s = stroke.current;
     if (!s || (s.x === x && s.y === y)) return;
     for (const [px, py] of line(s.x, s.y, x, y)) setPixel(img.current, px, py, s.c);
@@ -192,7 +215,10 @@ export default function App() {
     redraw();
   }
 
-  const endStroke = () => (stroke.current = null);
+  const endStroke = () => {
+    stroke.current = null;
+    drag.current = null;
+  };
 
   async function confirmDiscard() {
     return !dirtyRef.current || ask("Descartar as alterações não salvas?", { title: "will-pixel", kind: "warning" });
@@ -268,6 +294,14 @@ export default function App() {
         e.preventDefault();
         actions[k]();
       }
+      return;
+    }
+    const arrow = ARROWS[e.key];
+    if (arrow && tool === "move") {
+      e.preventDefault();
+      checkpoint();
+      img.current = shift(img.current, ...arrow);
+      redraw();
       return;
     }
     const t = TOOLS.find((t) => t.key === k);
@@ -367,7 +401,10 @@ export default function App() {
               ref={canvas}
               width={w}
               height={h}
-              className="absolute inset-0 size-full cursor-crosshair [image-rendering:pixelated]"
+              className={cn(
+                "absolute inset-0 size-full [image-rendering:pixelated]",
+                tool === "move" ? "cursor-move" : "cursor-crosshair",
+              )}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={endStroke}

@@ -63,6 +63,14 @@ export function fill(img: Img, x: number, y: number, c: RGBA) {
   }
 }
 
+/** Copy of the image moved by (dx,dy). What goes past the edge is cut off. */
+export function shift(img: Img, dx: number, dy: number): Img {
+  const out = blank(img.w, img.h);
+  for (let y = 0; y < img.h; y++)
+    for (let x = 0; x < img.w; x++) setPixel(out, x + dx, y + dy, getPixel(img, x, y));
+  return out;
+}
+
 export function hexToRgba(hex: string): RGBA {
   const n = parseInt(hex.slice(1, 7), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255, 255];

@@ -1,7 +1,7 @@
 /// <reference types="node" />
 // Self-check of the pixel helpers: npm run check
 import assert from "node:assert/strict";
-import { blank, fill, getPixel, hexToRgba, line, rgbaToHex, setPixel } from "./pixels.ts";
+import { blank, fill, getPixel, hexToRgba, line, rgbaToHex, setPixel, shift } from "./pixels.ts";
 
 // line: diagonal, reversed and single point have no gaps
 assert.deepEqual(line(0, 0, 3, 3), [[0, 0], [1, 1], [2, 2], [3, 3]]);
@@ -23,6 +23,14 @@ fill(img, 0, 0, red);
 
 // out of bounds writes are ignored
 setPixel(img, 9, 9, red);
+
+// shift moves pixels and cuts what leaves the image
+const dot = blank(3, 3);
+setPixel(dot, 0, 0, red);
+const moved = shift(dot, 1, 2);
+assert.deepEqual(getPixel(moved, 1, 2), red);
+assert.deepEqual(getPixel(moved, 0, 0), [0, 0, 0, 0]);
+assert.ok(shift(dot, 3, 0).data.every((v) => v === 0));
 
 assert.equal(rgbaToHex(hexToRgba("#5a5a6a")), "#5a5a6a");
 console.log("pixels ok");
