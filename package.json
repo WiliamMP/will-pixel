@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "check": "node src/lib/pixels.check.ts"
+    "check": "node src/lib/pixels.check.ts && node src/lib/color.check.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

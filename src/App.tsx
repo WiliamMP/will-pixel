@@ -13,7 +13,6 @@ import {
   PaintBucket,
   Pencil,
   Pipette,
-  Plus,
   Redo2,
   Save,
   SquareDashed,
@@ -21,9 +20,12 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { ColorPicker } from "@/components/ColorPicker";
+import { PalettePanel } from "@/components/PalettePanel";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { WindowControls, dragWindow } from "@/components/WindowControls";
+import { PNG_FILTER, decodePng, encodePng, toImageData } from "@/lib/png";
 import { splashDone } from "@/lib/splash";
 import { cn } from "@/lib/utils";
 import {
@@ -66,68 +68,21 @@ const ARROWS: Record<string, [number, number]> = {
 };
 
 const SIZES = [8, 16, 32, 64];
-// Starting palette: the colors of the first sprites (Sword1, Sword2, Character_Base)
-const DEFAULT_PALETTE = [
-  "#1a1626", "#5a5a6a", "#9a9aae", "#ffffff",
-  "#c8902a", "#f0c850", "#8a5a2b", "#5c3a1e",
-  "#8a2020", "#c03838", "#e86060", "#ffd2b4",
-  "#c5987a", "#262b44", "#3a4466", "#60a4ff",
-];
-const PALETTE_KEY = "will-pixel.palette";
 const HISTORY_MAX = 100;
 // ponytail: whole-image snapshots per stroke and a full redraw per change, fine up to 256x256
 const MAX_SIDE = 256;
-const PNG = [{ name: "PNG", extensions: ["png"] }];
 // One checker cell per sprite pixel, so transparent areas still show the pixel size
 const CHECKER = "repeating-conic-gradient(#7d8294 0 25%, #9aa0b3 0 50%)";
 
-function loadPalette(): string[] {
-  try {
-    const p = JSON.parse(localStorage.getItem(PALETTE_KEY) ?? "null");
-    return Array.isArray(p) ? p : DEFAULT_PALETTE;
-  } catch {
-    return DEFAULT_PALETTE;
-  }
-}
-
 /** Zoom that makes the image about 480px on screen */
 const fitZoom = (img: Img) => Math.max(1, Math.floor(480 / Math.max(img.w, img.h)));
-
-const toImageData = (img: Img) => new ImageData(img.data, img.w, img.h);
-
-async function encodePng(img: Img): Promise<number[]> {
-  const c = document.createElement("canvas");
-  c.width = img.w;
-  c.height = img.h;
-  c.getContext("2d")!.putImageData(toImageData(img), 0, 0);
-  const blob = await new Promise<Blob>((res, rej) =>
-    c.toBlob((b) => (b ? res(b) : rej(new Error("Falha ao gerar o PNG"))), "image/png"),
-  );
-  return Array.from(new Uint8Array(await blob.arrayBuffer()));
-}
-
-async function decodePng(bytes: number[]): Promise<Img> {
-  const bmp = await createImageBitmap(new Blob([new Uint8Array(bytes)]), {
-    premultiplyAlpha: "none",
-    colorSpaceConversion: "none",
-  });
-  if (bmp.width > MAX_SIDE || bmp.height > MAX_SIDE)
-    throw new Error(`Imagem grande demais (${bmp.width}x${bmp.height}). Máximo ${MAX_SIDE}x${MAX_SIDE}.`);
-  const c = document.createElement("canvas");
-  c.width = bmp.width;
-  c.height = bmp.height;
-  const ctx = c.getContext("2d")!;
-  ctx.drawImage(bmp, 0, 0);
-  return { w: c.width, h: c.height, data: ctx.getImageData(0, 0, c.width, c.height).data };
-}
 
 export default function App() {
   const img = useRef<Img>(blank(16, 16));
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   const [zoom, setZoom] = useState(() => fitZoom(img.current));
   const [tool, setTool] = useState<Tool>("pencil");
-  const [color, setColor] = useState(DEFAULT_PALETTE[0]);
-  const [palette, setPalette] = useState(loadPalette);
+  const [color, setColor] = useState("#1a1626");
   const [grid, setGrid] = useState(true);
   const [path, setPath] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -284,10 +239,10 @@ export default function App() {
 
   async function openFile() {
     if (!(await confirmDiscard())) return;
-    const p = await open({ filters: PNG, defaultPath: path ?? undefined });
+    const p = await open({ filters: PNG_FILTER, defaultPath: path ?? undefined });
     if (typeof p !== "string") return;
     try {
-      load(await decodePng(await invoke<number[]>("read_file", { path: p })), p);
+      load(await decodePng(await invoke<number[]>("read_file", { path: p }), MAX_SIDE), p);
     } catch (err) {
       toast.error(String(err));
     }
@@ -296,7 +251,7 @@ export default function App() {
   async function saveFile(as: boolean) {
     let p = as ? null : path;
     if (!p) {
-      p = await save({ filters: PNG, defaultPath: path ?? "sprite.png" });
+      p = await save({ filters: PNG_FILTER, defaultPath: path ?? "sprite.png" });
       if (!p) return;
       if (!/\.png$/i.test(p)) p += ".png";
     }
@@ -310,11 +265,10 @@ export default function App() {
     }
   }
 
-  function updatePalette(next: string[]) {
-    setPalette(next);
-    try {
-      localStorage.setItem(PALETTE_KEY, JSON.stringify(next));
-    } catch {}
+  function applyImage(next: Img) {
+    checkpoint();
+    img.current = next;
+    redraw();
   }
 
   function pickColor(hex: string) {
@@ -494,7 +448,7 @@ export default function App() {
           </div>
         </main>
 
-        <aside className="flex w-56 shrink-0 flex-col gap-5 overflow-y-auto border-l p-3">
+        <aside className="flex w-64 shrink-0 flex-col gap-5 overflow-y-auto border-l p-3">
           <section className="flex flex-col gap-2">
             <h2 className="text-xs font-medium text-muted-foreground">Prévia</h2>
             {/* Blue-gray background: shows if the sprite still reads at real size */}
@@ -512,51 +466,10 @@ export default function App() {
 
           <section className="flex flex-col gap-2">
             <h2 className="text-xs font-medium text-muted-foreground">Cor</h2>
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                aria-label="Escolher cor"
-                value={color}
-                onChange={(e) => pickColor(e.target.value)}
-                className="h-8 w-10 cursor-pointer rounded border bg-transparent"
-              />
-              <span className="flex-1 font-mono text-sm">{color}</span>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                title="Adicionar à paleta"
-                aria-label="Adicionar à paleta"
-                disabled={palette.includes(color)}
-                onClick={() => updatePalette([...palette, color])}
-              >
-                <Plus />
-              </Button>
-            </div>
+            <ColorPicker value={color} onChange={pickColor} />
           </section>
 
-          <section className="flex flex-col gap-2">
-            <h2 className="text-xs font-medium text-muted-foreground">Paleta</h2>
-            <div className="grid grid-cols-8 gap-1">
-              {palette.map((hex) => (
-                <button
-                  key={hex}
-                  title={`${hex} · botão direito remove`}
-                  aria-label={hex}
-                  className={cn(
-                    "aspect-square rounded-sm border border-black/30",
-                    hex === color && "ring-2 ring-primary ring-offset-1 ring-offset-background",
-                  )}
-                  style={{ background: hex }}
-                  onClick={() => pickColor(hex)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    updatePalette(palette.filter((c) => c !== hex));
-                  }}
-                />
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground">Botão direito no desenho apaga.</p>
-          </section>
+          <PalettePanel color={color} onPick={pickColor} getImage={() => img.current} applyImage={applyImage} />
         </aside>
       </div>
 

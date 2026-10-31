@@ -7,6 +7,9 @@ O dono vem do **Delphi** e está aprendendo Rust e React: ao explicar código no
 ## Arquitetura
 
 - `src/lib/pixels.ts`: lógica pura da imagem (RGBA em `Uint8ClampedArray`, linha de Bresenham, balde). Sem DOM.
+- `src/lib/color.ts`: conversões HSV/OKLab, distância perceptual, cores parecidas, extrair (median cut), converter para paleta, variações com hue shifting. `src/lib/png.ts`: PNG <-> `Img`.
+- `src/components/ColorPicker.tsx`: seletor HSV em círculo ou anel + triângulo, desenhado pixel a pixel num canvas.
+- `src/components/PalettePanel.tsx`: variações e gerenciador de paletas (várias paletas salvas no localStorage).
 - `src/App.tsx`: a tela inteira. A imagem vive num `useRef` e é repintada a cada render; histórico = cópia da imagem por traço.
 - `src-tauri/src/lib.rs`: `read_file` / `write_file` (bytes do PNG) e `close_splash`. Os caminhos vêm do plugin dialog. **Comando novo precisa entrar no `generate_handler!`.**
 - `src/lib/splash.ts` + `splashscreen.html` + `src/splash.ts`: janela de splash.
@@ -20,7 +23,7 @@ O dono vem do **Delphi** e está aprendendo Rust e React: ao explicar código no
 ## Testes
 
 ```bash
-npm run check          # self-check de src/lib/pixels.ts
+npm run check          # self-checks de src/lib/pixels.ts e src/lib/color.ts
 npx tsc --noEmit -p .
 ```
 
