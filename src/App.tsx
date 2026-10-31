@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
@@ -9,6 +9,7 @@ import {
   FlipVertical2,
   FolderOpen,
   Grid3x3,
+  LayoutGrid,
   Move,
   PaintBucket,
   Pencil,
@@ -25,6 +26,7 @@ import { PalettePanel } from "@/components/PalettePanel";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { WindowControls, dragWindow } from "@/components/WindowControls";
+import { seams } from "@/lib/color";
 import { PNG_FILTER, decodePng, encodePng, toImageData } from "@/lib/png";
 import { splashDone } from "@/lib/splash";
 import { cn } from "@/lib/utils";
@@ -79,11 +81,14 @@ const fitZoom = (img: Img) => Math.max(1, Math.floor(480 / Math.max(img.w, img.h
 
 export default function App() {
   const img = useRef<Img>(blank(16, 16));
-  const [, redraw] = useReducer((n: number) => n + 1, 0);
+  const [version, redraw] = useReducer((n: number) => n + 1, 0);
   const [zoom, setZoom] = useState(() => fitZoom(img.current));
   const [tool, setTool] = useState<Tool>("pencil");
   const [color, setColor] = useState("#1a1626");
   const [grid, setGrid] = useState(true);
+  // Texture mode: the drawing repeated 3x3 around the editable center, seams marked
+  const [tile, setTile] = useState(false);
+  const tiles = useRef<(HTMLCanvasElement | null)[]>([]);
   const [path, setPath] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [cursor, setCursor] = useState("");
@@ -108,7 +113,8 @@ export default function App() {
   // Repaint after every render: a sprite is a few KB, cheaper than tracking what changed
   useLayoutEffect(() => {
     const data = toImageData(img.current);
-    for (const c of [canvas.current, preview.current, previewBig.current]) c?.getContext("2d")!.putImageData(data, 0, 0);
+    for (const c of [canvas.current, preview.current, previewBig.current, ...tiles.current])
+      c?.getContext("2d")!.putImageData(data, 0, 0);
   });
 
   function checkpoint() {
@@ -222,6 +228,16 @@ export default function App() {
     return !dirtyRef.current || ask("Descartar as alterações não salvas?", { title: "will-pixel", kind: "warning" });
   }
 
+  // `version` changes whenever the image does
+  const report = useMemo(() => (tile ? seams(img.current) : null), [tile, version]);
+
+  function toggleTile() {
+    const on = !tile;
+    setTile(on);
+    // 3x3 copies: shrink the zoom so the whole block fits where the single image did
+    setZoom(Math.max(1, Math.floor(fitZoom(img.current) / (on ? 3 : 1))));
+  }
+
   function load(next: Img, p: string | null) {
     past.current = [];
     future.current = [];
@@ -313,6 +329,7 @@ export default function App() {
       return redraw();
     }
     if (e.shiftKey && (k === "h" || k === "v")) return flipArea(k === "h");
+    if (k === "t") return toggleTile();
     const t = TOOLS.find((t) => t.key === k);
     if (t) setTool(t.id);
   };
@@ -332,6 +349,20 @@ export default function App() {
   }, []);
 
   const { w, h } = img.current;
+  /** One of the 8 repeated copies around the center in texture mode, repainted with the others.
+   *  A plain function, not a component: the canvases keep their identity between renders. */
+  const tileCopy = (index: number) => (
+    <canvas
+      key={index}
+      ref={(c) => {
+        tiles.current[index] = c;
+      }}
+      width={w}
+      height={h}
+      className="[image-rendering:pixelated]"
+      style={{ width: w * zoom, height: h * zoom, background: CHECKER, backgroundSize: `${zoom * 2}px ${zoom * 2}px` }}
+    />
+  );
   const name = path ? path.split(/[\\/]/).pop() : "sem título";
   const bigScale = Math.max(2, Math.floor(128 / Math.max(w, h)));
 
@@ -401,6 +432,9 @@ export default function App() {
           <ToolButton label="Grade" active={grid} onClick={() => setGrid((g) => !g)}>
             <Grid3x3 />
           </ToolButton>
+          <ToolButton label="Modo textura: repete 3x3 e marca as emendas (T)" active={tile} onClick={toggleTile}>
+            <LayoutGrid />
+          </ToolButton>
         </aside>
 
         <main
@@ -410,8 +444,10 @@ export default function App() {
             setZoom(Math.min(64, Math.max(1, zoom + d)));
           }}
         >
+          <div className={cn("m-auto shrink-0", tile && "grid grid-cols-3")}>
+          {tile && [0, 1, 2, 3].map(tileCopy)}
           <div
-            className="relative m-auto shrink-0 shadow-lg"
+            className={cn("relative shrink-0 shadow-lg", tile && "z-10 outline outline-primary/70")}
             style={{ width: w * zoom, height: h * zoom, background: CHECKER, backgroundSize: `${zoom * 2}px ${zoom * 2}px` }}
           >
             <canvas
@@ -445,6 +481,19 @@ export default function App() {
                 style={{ left: sel.x * zoom, top: sel.y * zoom, width: sel.w * zoom, height: sel.h * zoom }}
               />
             )}
+            {/* Seams: red bars on both sides of each edge pixel that doesn't continue on the other side */}
+            {report?.rows.flatMap((y) =>
+              [-3, w * zoom].map((left) => (
+                <div key={`r${y}${left}`} className="pointer-events-none absolute w-[3px] bg-destructive" style={{ left, top: y * zoom, height: zoom }} />
+              )),
+            )}
+            {report?.cols.flatMap((x) =>
+              [-3, h * zoom].map((top) => (
+                <div key={`c${x}${top}`} className="pointer-events-none absolute h-[3px] bg-destructive" style={{ top, left: x * zoom, width: zoom }} />
+              )),
+            )}
+          </div>
+          {tile && [4, 5, 6, 7].map(tileCopy)}
           </div>
         </main>
 
@@ -463,6 +512,15 @@ export default function App() {
               />
             </div>
           </section>
+
+          {report && (
+            <section className="flex flex-col gap-1.5">
+              <h2 className="text-xs font-medium text-muted-foreground">Textura</h2>
+              <SeamLine label="Esquerda e direita" count={report.rows.length} />
+              <SeamLine label="Cima e baixo" count={report.cols.length} />
+              <p className="text-xs text-muted-foreground">As marcas vermelhas mostram onde a borda não continua do outro lado.</p>
+            </section>
+          )}
 
           <section className="flex flex-col gap-2">
             <h2 className="text-xs font-medium text-muted-foreground">Cor</h2>
@@ -513,5 +571,16 @@ function ToolButton({
     >
       {children}
     </Button>
+  );
+}
+
+function SeamLine({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span>{label}</span>
+      <span className={count ? "text-warning" : "text-success"}>
+        {count ? `${count} ${count > 1 ? "emendas" : "emenda"}` : "sem emenda"}
+      </span>
+    </div>
   );
 }

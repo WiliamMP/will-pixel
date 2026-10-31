@@ -156,6 +156,40 @@ export function extractColors(img: Img, max: number): string[] {
   return [...new Set(colors.map(rgbToHex))];
 }
 
+/** Difference of two RGBA pixels: both transparent = 0, transparent vs visible = 1, else perceptual */
+function pixelDistance(img: Img, i: number, j: number) {
+  const d = img.data;
+  if (!d[i + 3] && !d[j + 3]) return 0;
+  if (!d[i + 3] || !d[j + 3]) return 1;
+  return distance([d[i], d[i + 1], d[i + 2]], [d[j], d[j + 1], d[j + 2]]);
+}
+
+/** Smallest jump across an edge that counts as a seam, even on a flat texture */
+const SEAM_MIN = 0.08;
+
+/** Where the image breaks when repeated: `rows` = y where the right edge doesn't continue into the left one,
+ *  `cols` = x where the bottom edge doesn't continue into the top one.
+ *  ponytail: a jump counts as a seam when it is bigger than twice the texture's own average jump;
+ *  good for pixel art, a gradient-aware check if noisy textures give false alarms */
+export function seams(img: Img): { rows: number[]; cols: number[] } {
+  const { w, h } = img;
+  const at = (x: number, y: number) => (y * w + x) * 4;
+  let sumX = 0;
+  let sumY = 0;
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      if (x + 1 < w) sumX += pixelDistance(img, at(x, y), at(x + 1, y));
+      if (y + 1 < h) sumY += pixelDistance(img, at(x, y), at(x, y + 1));
+    }
+  const limitX = Math.max(SEAM_MIN, (2 * sumX) / Math.max(1, (w - 1) * h));
+  const limitY = Math.max(SEAM_MIN, (2 * sumY) / Math.max(1, w * (h - 1)));
+  const rows: number[] = [];
+  const cols: number[] = [];
+  for (let y = 0; y < h; y++) if (pixelDistance(img, at(w - 1, y), at(0, y)) > limitX) rows.push(y);
+  for (let x = 0; x < w; x++) if (pixelDistance(img, at(x, h - 1), at(x, 0)) > limitY) cols.push(x);
+  return { rows, cols };
+}
+
 /** Moves hue h toward target by at most `deg` degrees, the short way around the circle */
 function shiftHue(h: number, target: number, deg: number) {
   const diff = ((target - h + 540) % 360) - 180;

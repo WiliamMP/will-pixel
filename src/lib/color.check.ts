@@ -11,6 +11,7 @@ import {
   ramp,
   rgbToHex,
   rgbToHsv,
+  seams,
   similarPairs,
 } from "./color.ts";
 
@@ -51,5 +52,19 @@ assert.equal(r.length, 7);
 assert.equal(r[3], "#c03838");
 const value = (hex: string) => rgbToHsv(hexToRgb(hex))[2];
 for (let i = 1; i < r.length; i++) assert.ok(value(r[i]) >= value(r[i - 1]), `${r[i - 1]} -> ${r[i]}`);
+
+// seams: a flat tile repeats cleanly; a stripe on one edge breaks only that direction
+const tile = blank(4, 4);
+for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) setPixel(tile, x, y, [60, 120, 60, 255]);
+assert.deepEqual(seams(tile), { rows: [], cols: [] });
+for (let y = 0; y < 4; y++) setPixel(tile, 3, y, [200, 40, 40, 255]);
+assert.deepEqual(seams(tile).rows, [0, 1, 2, 3]);
+assert.deepEqual(seams(tile).cols, []);
+// a stripe on both opposite edges continues across the wrap, so no seam on the left/right join
+for (let y = 0; y < 4; y++) setPixel(tile, 0, y, [200, 40, 40, 255]);
+assert.deepEqual(seams(tile).rows, []);
+// one bottom pixel that doesn't match the top one
+setPixel(tile, 2, 3, [0, 0, 0, 0]);
+assert.deepEqual(seams(tile).cols, [2]);
 
 console.log("color ok");
