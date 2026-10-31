@@ -9,6 +9,7 @@ import {
   FlipVertical2,
   FolderOpen,
   Grid3x3,
+  Images,
   Grid2x2,
   LayoutGrid,
   LoaderPinwheel,
@@ -27,6 +28,7 @@ import {
 import { toast } from "sonner";
 import { ColorPicker } from "@/components/ColorPicker";
 import { PalettePanel } from "@/components/PalettePanel";
+import { SpriteSheetDialog } from "@/components/SpriteSheetDialog";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { WindowControls, dragWindow } from "@/components/WindowControls";
@@ -105,6 +107,7 @@ export default function App() {
   const [tile, setTile] = useState(false);
   const tiles = useRef<(HTMLCanvasElement | null)[]>([]);
   const [symmetry, setSymmetry] = useState<Symmetry>("off");
+  const [sheetOpen, setSheetOpen] = useState(false);
   const sym = SYMMETRIES.find((m) => m.id === symmetry)!;
   const [path, setPath] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -324,6 +327,8 @@ export default function App() {
   // Shortcuts read the latest state through this ref, the listener is added once
   const onKey = useRef<(e: KeyboardEvent) => void>(null);
   onKey.current = (e) => {
+    // The sprite sheet dialog is on top: only Esc (close) goes through, so Delete/Ctrl+Z don't touch the drawing
+    if (sheetOpen) return e.key === "Escape" && setSheetOpen(false);
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     const k = e.key.toLowerCase();
     if (e.ctrlKey) {
@@ -421,6 +426,10 @@ export default function App() {
             </option>
           ))}
         </select>
+        <Button variant="ghost" size="sm" title="Juntar vários sprites numa spritesheet" onClick={() => setSheetOpen(true)}>
+          <Images />
+          Spritesheet
+        </Button>
         <Button variant="ghost" size="sm" title="Abrir (Ctrl+O)" onClick={openFile}>
           <FolderOpen />
           Abrir
@@ -584,6 +593,11 @@ export default function App() {
         )}
         {symmetry !== "off" && <span>{sym.label.toLowerCase()}</span>}
       </footer>
+      <SpriteSheetDialog
+        open={sheetOpen}
+        current={() => ({ name: path ? path.split(/[\\/]/).pop()!.replace(/\.png$/i, "") : "desenho", img: clone(img.current) })}
+        onClose={() => setSheetOpen(false)}
+      />
       <Toaster position="bottom-center" richColors />
     </div>
   );
