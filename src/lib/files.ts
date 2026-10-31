@@ -1,6 +1,6 @@
 // PNG import/export through the native dialogs, shared by the sheet dialogs
 import { invoke } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import type { Img } from "./pixels";
 import { PNG_FILTER, decodePng, encodePng } from "./png";
@@ -35,6 +35,22 @@ export async function exportPng(img: Img, defaultName: string, json?: (fileName:
       await invoke("write_file", { path: p.replace(/\.png$/i, ".json"), bytes: Array.from(new TextEncoder().encode(text)) });
     }
     toast.success(`Salvo em ${p}`);
+  } catch (err) {
+    toast.error(String(err));
+  }
+}
+
+/** Asks for a folder and writes one PNG per sprite, named after it. Confirms before overwriting. */
+export async function exportPngs(sprites: Sprite[]) {
+  const dir = await open({ directory: true, title: "Pasta para os PNGs" });
+  if (typeof dir !== "string") return;
+  const paths = sprites.map((s) => `${dir.replace(/[\\/]$/, "")}\\${s.name}.png`);
+  const taken = (await Promise.all(paths.map((path) => invoke<boolean>("exists", { path })))).filter(Boolean).length;
+  if (taken && !(await ask(`${taken} arquivo(s) com o mesmo nome já existem nessa pasta e serão substituídos. Continuar?`, { title: "will-pixel", kind: "warning" })))
+    return;
+  try {
+    for (let i = 0; i < sprites.length; i++) await invoke("write_file", { path: paths[i], bytes: await encodePng(sprites[i].img) });
+    toast.success(`${sprites.length} PNGs salvos em ${dir}`);
   } catch (err) {
     toast.error(String(err));
   }

@@ -108,6 +108,14 @@ function* pixelsOf(r: Rect) {
   for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) yield [x, y] as const;
 }
 
+/** Copy of the part of the image under r; what falls outside the image is transparent */
+export function crop(img: Img, r: Rect): Img {
+  const out = blank(r.w, r.h);
+  for (let y = 0; y < r.h; y++)
+    for (let x = 0; x < r.w; x++) if (inside(img, r.x + x, r.y + y)) setPixel(out, x, y, getPixel(img, r.x + x, r.y + y));
+  return out;
+}
+
 export function clearRect(img: Img, r: Rect) {
   for (const [x, y] of pixelsOf(r)) setPixel(img, x, y, CLEAR);
 }

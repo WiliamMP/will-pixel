@@ -1,8 +1,8 @@
 /// <reference types="node" />
 // Self-check of the direction helpers: npm run check
 import assert from "node:assert/strict";
-import { crop, gridSprites, mirrored, trimRow, unionBounds } from "./directions.ts";
-import { blank, getPixel, setPixel } from "./pixels.ts";
+import { gridSprites, mirrored, trimRow, unionBounds } from "./directions.ts";
+import { blank, crop, getPixel, setPixel } from "./pixels.ts";
 import { buildSheet } from "./sheet.ts";
 
 const ink = [26, 22, 38, 255] as [number, number, number, number];

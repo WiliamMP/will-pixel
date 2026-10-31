@@ -10,6 +10,7 @@ import {
   FlipVertical2,
   FolderOpen,
   Grid3x3,
+  Grid2x2Check,
   Images,
   Grid2x2,
   LayoutGrid,
@@ -35,6 +36,7 @@ import { ColorPicker } from "@/components/ColorPicker";
 import { PalettePanel } from "@/components/PalettePanel";
 import { DirectionsDialog } from "@/components/DirectionsDialog";
 import { SpriteSheetDialog } from "@/components/SpriteSheetDialog";
+import { TilesetDialog } from "@/components/TilesetDialog";
 import { ONION_NEXT, ONION_PREV, Timeline } from "@/components/Timeline";
 import { animFrame, type LoopMode } from "@/lib/anim";
 import { Button } from "@/components/ui/button";
@@ -148,7 +150,7 @@ export default function App() {
   const tiles = useRef<(HTMLCanvasElement | null)[]>([]);
   const [symmetry, setSymmetry] = useState<Symmetry>("off");
   // The dialog on top of the editor, if any
-  const [dialog, setDialog] = useState<"sheet" | "directions" | null>(null);
+  const [dialog, setDialog] = useState<"sheet" | "directions" | "tileset" | null>(null);
   const sym = SYMMETRIES.find((m) => m.id === symmetry)!;
   const [path, setPath] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -398,6 +400,14 @@ export default function App() {
     redraw();
   }
 
+  /** Tiles picked in the tileset dialog become the frames of a new drawing */
+  async function editTiles(tiles: Img[]) {
+    if (!tiles.length || !(await confirmDiscard())) return;
+    load(tiles[0], null);
+    frames.current = tiles;
+    showFrame(0);
+  }
+
   async function newImage(size: number) {
     if (await confirmDiscard()) load(blank(size, size), null);
   }
@@ -562,6 +572,10 @@ export default function App() {
         <Button variant="ghost" size="sm" title="Organizar as direções norte, sul, leste e oeste" onClick={() => setDialog("directions")}>
           <Compass />
           Direções
+        </Button>
+        <Button variant="ghost" size="sm" title="Montar tilesets, configurar a grade e exportar os recortes" onClick={() => setDialog("tileset")}>
+          <Grid2x2Check />
+          Tileset
         </Button>
         <Button variant="ghost" size="sm" title="Abrir (Ctrl+O)" onClick={openFile}>
           <FolderOpen />
@@ -805,6 +819,13 @@ export default function App() {
       </footer>
       <SpriteSheetDialog open={dialog === "sheet"} current={currentSprite} allFrames={allFrames} onClose={() => setDialog(null)} />
       <DirectionsDialog open={dialog === "directions"} current={currentSprite} allFrames={allFrames} onClose={() => setDialog(null)} />
+      <TilesetDialog
+        open={dialog === "tileset"}
+        current={currentSprite}
+        allFrames={allFrames}
+        onEdit={editTiles}
+        onClose={() => setDialog(null)}
+      />
       <Toaster position="bottom-center" richColors />
     </div>
   );

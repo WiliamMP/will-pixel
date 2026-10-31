@@ -1,5 +1,5 @@
 // Character directions laid out as sheet rows, with the drawings lined up across directions. No DOM.
-import { blank, clone, flip, full, getPixel, inside, setPixel, type Img, type Rect } from "./pixels.ts";
+import { blank, clone, crop, flip, full, type Img, type Rect } from "./pixels.ts";
 
 /** Row order of the sheet: down, left, right, up (the RPG Maker order most engines and tutorials use) */
 export const DIRECTIONS = [
@@ -27,13 +27,6 @@ export function unionBounds(imgs: Img[]): Rect | null {
           y1 = Math.max(y1, y);
         }
   return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
-}
-
-export function crop(img: Img, r: Rect): Img {
-  const out = blank(r.w, r.h);
-  for (let y = 0; y < r.h; y++)
-    for (let x = 0; x < r.w; x++) if (inside(img, r.x + x, r.y + y)) setPixel(out, x, y, getPixel(img, r.x + x, r.y + y));
-  return out;
 }
 
 export const mirrored = (imgs: Img[]) =>
