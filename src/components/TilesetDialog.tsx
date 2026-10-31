@@ -17,12 +17,15 @@ export function TilesetDialog({
   open,
   current,
   allFrames,
+  cut,
   onEdit,
   onClose,
 }: {
   open: boolean;
   current: () => Sprite;
   allFrames: () => Sprite[];
+  /** The editor's cut grid size, used as the tile size for the current drawing (0 = keep the grid) */
+  cut: number;
   /** Loads the picked tiles into the editor, one frame each */
   onEdit: (tiles: Img[]) => void;
   onClose: () => void;
@@ -115,7 +118,7 @@ export function TilesetDialog({
               <FolderOpen />
               Abrir tileset (PNG)
             </Button>
-            <Button variant="outline" size="sm" title="Usa o desenho do editor como tileset" onClick={() => load(current())}>
+            <Button variant="outline" size="sm" title="Usa o desenho do editor como tileset" onClick={() => load(current(), cut ? { tileW: cut, tileH: cut, margin: 0, spacing: 0 } : undefined)}>
               <Plus />
               Desenho atual
             </Button>

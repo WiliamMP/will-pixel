@@ -22,6 +22,7 @@ import {
   Pencil,
   Pipette,
   Redo2,
+  Scissors,
   Save,
   SquareSplitHorizontal,
   SquareSplitVertical,
@@ -102,7 +103,11 @@ const LOOPS: { id: LoopMode; label: string }[] = [
   { id: "once", label: "Uma vez" },
 ];
 
-const SIZES = [8, 16, 32, 64];
+// Square sprites first, then taller props (trees, houses) drawn whole and cut into tiles later.
+// ponytail: fixed presets, a width/height field if a size is missing
+const SIZES: [number, number][] = [[8, 8], [16, 16], [32, 32], [64, 64], [32, 48], [48, 64], [64, 96], [96, 128], [128, 128]];
+// The cut grid button cycles through these tile sizes (0 = off)
+const CUTS = [0, 16, 32, 8];
 const HISTORY_MAX = 100;
 // ponytail: whole-image snapshots per stroke and a full redraw per change, fine up to 256x256
 const MAX_SIDE = 256;
@@ -145,6 +150,8 @@ export default function App() {
   const [tool, setTool] = useState<Tool>("pencil");
   const [color, setColor] = useState("#1a1626");
   const [grid, setGrid] = useState(true);
+  // Cut grid: lines every `cut` pixels where the drawing will be split into tiles, 0 = off
+  const [cut, setCut] = useState(0);
   // Texture mode: the drawing repeated 3x3 around the editable center, seams marked
   const [tile, setTile] = useState(false);
   const tiles = useRef<(HTMLCanvasElement | null)[]>([]);
@@ -408,8 +415,8 @@ export default function App() {
     showFrame(0);
   }
 
-  async function newImage(size: number) {
-    if (await confirmDiscard()) load(blank(size, size), null);
+  async function newImage(w: number, h: number) {
+    if (await confirmDiscard()) load(blank(w, h), null);
   }
 
   async function openFile() {
@@ -496,6 +503,7 @@ export default function App() {
     if (k === ".") return stepFrame(1);
     if (e.key === "Enter") return togglePlay();
     if (k === "s") return cycleSymmetry();
+    if (k === "c") return setCut((c) => CUTS[(CUTS.indexOf(c) + 1) % CUTS.length]);
     const t = TOOLS.find((t) => t.key === k);
     if (t) setTool(t.id);
   };
@@ -554,14 +562,14 @@ export default function App() {
           title="Novo desenho"
           className="h-7 rounded-md border bg-background px-2 text-sm"
           value=""
-          onChange={(e) => newImage(Number(e.target.value))}
+          onChange={(e) => newImage(...SIZES[Number(e.target.value)])}
         >
           <option value="" disabled hidden>
             Novo…
           </option>
-          {SIZES.map((s) => (
-            <option key={s} value={s}>
-              {s}x{s}
+          {SIZES.map(([sw, sh], i) => (
+            <option key={i} value={i}>
+              {sw}x{sh}
             </option>
           ))}
         </select>
@@ -617,6 +625,13 @@ export default function App() {
           </ToolButton>
           <ToolButton label="Grade" active={grid} onClick={() => setGrid((g) => !g)}>
             <Grid3x3 />
+          </ToolButton>
+          <ToolButton
+            label={`Grade de corte${cut ? ` ${cut}x${cut}` : " desligada"} · clique troca (C)`}
+            active={cut > 0}
+            onClick={() => setCut((c) => CUTS[(CUTS.indexOf(c) + 1) % CUTS.length])}
+          >
+            <Scissors />
           </ToolButton>
           <ToolButton label="Modo textura: repete 3x3 e marca as emendas (T)" active={tile} onClick={toggleTile}>
             <LayoutGrid />
@@ -675,6 +690,17 @@ export default function App() {
                   backgroundImage:
                     "linear-gradient(to right, rgb(0 0 0 / 0.22) 1px, transparent 1px), linear-gradient(to bottom, rgb(0 0 0 / 0.22) 1px, transparent 1px)",
                   backgroundSize: `${zoom}px ${zoom}px`,
+                }}
+              />
+            )}
+            {/* Cut grid: where the Tileset dialog will split the drawing, shown at any zoom */}
+            {cut > 0 && (
+              <div
+                className="pointer-events-none absolute inset-0"
+                style={{
+                  backgroundImage:
+                    "linear-gradient(to right, var(--primary) 1px, transparent 1px), linear-gradient(to bottom, var(--primary) 1px, transparent 1px)",
+                  backgroundSize: `${cut * zoom}px ${cut * zoom}px`,
                 }}
               />
             )}
@@ -816,6 +842,7 @@ export default function App() {
           </span>
         )}
         {symmetry !== "off" && <span>{sym.label.toLowerCase()}</span>}
+        {cut > 0 && <span>corte {cut}x{cut}</span>}
       </footer>
       <SpriteSheetDialog open={dialog === "sheet"} current={currentSprite} allFrames={allFrames} onClose={() => setDialog(null)} />
       <DirectionsDialog open={dialog === "directions"} current={currentSprite} allFrames={allFrames} onClose={() => setDialog(null)} />
@@ -823,6 +850,7 @@ export default function App() {
         open={dialog === "tileset"}
         current={currentSprite}
         allFrames={allFrames}
+        cut={cut}
         onEdit={editTiles}
         onClose={() => setDialog(null)}
       />
