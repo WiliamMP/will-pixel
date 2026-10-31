@@ -63,12 +63,53 @@ export function fill(img: Img, x: number, y: number, c: RGBA) {
   }
 }
 
-/** Copy of the image moved by (dx,dy). What goes past the edge is cut off. */
-export function shift(img: Img, dx: number, dy: number): Img {
-  const out = blank(img.w, img.h);
-  for (let y = 0; y < img.h; y++)
-    for (let x = 0; x < img.w; x++) setPixel(out, x + dx, y + dy, getPixel(img, x, y));
+export type Rect = { x: number; y: number; w: number; h: number };
+
+export const full = (img: Img): Rect => ({ x: 0, y: 0, w: img.w, h: img.h });
+
+/** Rectangle with corners at two pixels, in any order, both included */
+export function rectBetween(ax: number, ay: number, bx: number, by: number): Rect {
+  return { x: Math.min(ax, bx), y: Math.min(ay, by), w: Math.abs(bx - ax) + 1, h: Math.abs(by - ay) + 1 };
+}
+
+/** The part of r inside the image, or null when nothing is left */
+export function clampRect(r: Rect, img: Img): Rect | null {
+  const x = Math.max(0, r.x);
+  const y = Math.max(0, r.y);
+  const w = Math.min(img.w, r.x + r.w) - x;
+  const h = Math.min(img.h, r.y + r.h) - y;
+  return w > 0 && h > 0 ? { x, y, w, h } : null;
+}
+
+function* pixelsOf(r: Rect) {
+  for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) yield [x, y] as const;
+}
+
+export function clearRect(img: Img, r: Rect) {
+  for (const [x, y] of pixelsOf(r)) setPixel(img, x, y, CLEAR);
+}
+
+/** Copy of the image with the pixels of r moved by (dx,dy). What goes past the edge is cut off;
+ *  transparent pixels of the moved piece don't cover what is under them. */
+export function moveRect(img: Img, r: Rect, dx: number, dy: number): Img {
+  const out = clone(img);
+  clearRect(out, r);
+  for (const [x, y] of pixelsOf(r)) {
+    if (!inside(img, x, y)) continue;
+    const p = getPixel(img, x, y);
+    if (p[3] > 0) setPixel(out, x + dx, y + dy, p);
+  }
   return out;
+}
+
+/** Mirrors the pixels of r in place. r must be inside the image (see clampRect). */
+export function flip(img: Img, r: Rect, horizontal: boolean) {
+  const src = clone(img);
+  for (const [x, y] of pixelsOf(r)) {
+    const sx = horizontal ? 2 * r.x + r.w - 1 - x : x;
+    const sy = horizontal ? y : 2 * r.y + r.h - 1 - y;
+    setPixel(img, x, y, getPixel(src, sx, sy));
+  }
 }
 
 export function hexToRgba(hex: string): RGBA {

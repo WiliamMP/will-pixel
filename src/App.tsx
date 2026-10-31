@@ -5,6 +5,8 @@ import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import {
   Brush,
   Eraser,
+  FlipHorizontal2,
+  FlipVertical2,
   FolderOpen,
   Grid3x3,
   Move,
@@ -14,6 +16,7 @@ import {
   Plus,
   Redo2,
   Save,
+  SquareDashed,
   Undo2,
   type LucideIcon,
 } from "lucide-react";
@@ -26,27 +29,34 @@ import { cn } from "@/lib/utils";
 import {
   CLEAR,
   blank,
+  clampRect,
+  clearRect,
   clone,
   fill,
+  flip,
+  full,
   getPixel,
   hexToRgba,
   inside,
   line,
+  moveRect,
+  rectBetween,
   rgbaToHex,
   setPixel,
-  shift,
   type Img,
+  type Rect,
   type RGBA,
 } from "@/lib/pixels";
 
-type Tool = "pencil" | "eraser" | "fill" | "picker" | "move";
+type Tool = "pencil" | "eraser" | "fill" | "picker" | "select" | "move";
 
 const TOOLS: { id: Tool; key: string; label: string; icon: LucideIcon }[] = [
   { id: "pencil", key: "b", label: "Lápis", icon: Pencil },
   { id: "eraser", key: "e", label: "Borracha", icon: Eraser },
   { id: "fill", key: "g", label: "Balde", icon: PaintBucket },
   { id: "picker", key: "i", label: "Conta-gotas", icon: Pipette },
-  { id: "move", key: "v", label: "Mover · setas movem 1px", icon: Move },
+  { id: "select", key: "m", label: "Seleção · Esc desmarca, Del apaga", icon: SquareDashed },
+  { id: "move", key: "v", label: "Mover a seleção ou tudo · setas movem 1px", icon: Move },
 ];
 const ARROWS: Record<string, [number, number]> = {
   ArrowLeft: [-1, 0],
@@ -122,13 +132,18 @@ export default function App() {
   const [path, setPath] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [cursor, setCursor] = useState("");
+  const [sel, setSel] = useState<Rect | null>(null);
   const past = useRef<Img[]>([]);
   const future = useRef<Img[]>([]);
   // The stroke in progress: last pixel painted and its color
   const stroke = useRef<{ x: number; y: number; c: RGBA } | null>(null);
-  // The move in progress: image before the drag and the pixel where it started.
+  // The move in progress: image before the drag, the area being moved and the pixel where it started.
   // Moving from `base` each time means pixels dragged off the edge come back if dragged back.
-  const drag = useRef<{ base: Img; x: number; y: number } | null>(null);
+  // ponytail: the piece is pasted on release, so moving it again also lifts what was under it;
+  // a floating selection (Aseprite style) if that gets in the way
+  const drag = useRef<{ base: Img; rect: Rect; x: number; y: number } | null>(null);
+  // The selection being drawn: the pixel where it started and whether the mouse left it
+  const selecting = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const preview = useRef<HTMLCanvasElement>(null);
   const previewBig = useRef<HTMLCanvasElement>(null);
@@ -158,6 +173,8 @@ export default function App() {
     redraw();
   }
   const undo = () => step(past.current, future.current);
+  /** What move, flip and delete act on: the selection, or the whole image when nothing is selected */
+  const area = () => (sel && clampRect(sel, img.current)) ?? full(img.current);
   const redo = () => step(future.current, past.current);
 
   function pixelAt(e: React.PointerEvent<HTMLCanvasElement>): [number, number] {
@@ -182,9 +199,15 @@ export default function App() {
       }
       return;
     }
+    if (t === "select") {
+      selecting.current = { x, y, moved: false };
+      setSel(rectBetween(x, y, x, y));
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
     checkpoint();
     if (t === "move") {
-      drag.current = { base: clone(img.current), x, y };
+      drag.current = { base: img.current, rect: area(), x, y };
       e.currentTarget.setPointerCapture(e.pointerId);
       return;
     }
@@ -201,10 +224,20 @@ export default function App() {
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
     const [x, y] = pixelAt(e);
     setCursor(inside(img.current, x, y) ? `${x}, ${y}` : "");
+    const s0 = selecting.current;
+    if (s0) {
+      const { w, h } = img.current;
+      const cx = Math.min(w - 1, Math.max(0, x));
+      const cy = Math.min(h - 1, Math.max(0, y));
+      s0.moved ||= cx !== s0.x || cy !== s0.y;
+      setSel(rectBetween(s0.x, s0.y, cx, cy));
+      return;
+    }
     const d = drag.current;
     if (d) {
-      img.current = shift(d.base, x - d.x, y - d.y);
-      redraw();
+      img.current = moveRect(d.base, d.rect, x - d.x, y - d.y);
+      if (sel) setSel({ ...d.rect, x: d.rect.x + x - d.x, y: d.rect.y + y - d.y });
+      else redraw();
       return;
     }
     const s = stroke.current;
@@ -216,9 +249,19 @@ export default function App() {
   }
 
   const endStroke = () => {
+    // A click without dragging clears the selection
+    if (selecting.current && !selecting.current.moved) setSel(null);
+    if (drag.current) setSel((s) => s && clampRect(s, img.current));
     stroke.current = null;
     drag.current = null;
+    selecting.current = null;
   };
+
+  function flipArea(horizontal: boolean) {
+    checkpoint();
+    flip(img.current, area(), horizontal);
+    redraw();
+  }
 
   async function confirmDiscard() {
     return !dirtyRef.current || ask("Descartar as alterações não salvas?", { title: "will-pixel", kind: "warning" });
@@ -228,6 +271,7 @@ export default function App() {
     past.current = [];
     future.current = [];
     img.current = next;
+    setSel(null);
     setZoom(fitZoom(next));
     setPath(p);
     setDirty(false);
@@ -289,6 +333,8 @@ export default function App() {
         y: redo,
         s: () => saveFile(e.shiftKey),
         o: openFile,
+        a: () => setSel(full(img.current)),
+        d: () => setSel(null),
       };
       if (actions[k]) {
         e.preventDefault();
@@ -300,10 +346,19 @@ export default function App() {
     if (arrow && tool === "move") {
       e.preventDefault();
       checkpoint();
-      img.current = shift(img.current, ...arrow);
+      const r = area();
+      img.current = moveRect(img.current, r, ...arrow);
+      if (sel) setSel(clampRect({ ...r, x: r.x + arrow[0], y: r.y + arrow[1] }, img.current));
       redraw();
       return;
     }
+    if (e.key === "Escape") return setSel(null);
+    if (e.key === "Delete" || e.key === "Backspace") {
+      checkpoint();
+      clearRect(img.current, area());
+      return redraw();
+    }
+    if (e.shiftKey && (k === "h" || k === "v")) return flipArea(k === "h");
     const t = TOOLS.find((t) => t.key === k);
     if (t) setTool(t.id);
   };
@@ -375,6 +430,14 @@ export default function App() {
             </ToolButton>
           ))}
           <div className="my-1 h-px w-6 bg-border" />
+          <ToolButton label="Espelhar na horizontal (Shift+H)" onClick={() => flipArea(true)}>
+            {/* lucide 1.x draws flip-vertical-2 around a vertical axis, which is the left/right mirror */}
+            <FlipVertical2 />
+          </ToolButton>
+          <ToolButton label="Espelhar na vertical (Shift+V)" onClick={() => flipArea(false)}>
+            <FlipHorizontal2 />
+          </ToolButton>
+          <div className="my-1 h-px w-6 bg-border" />
           <ToolButton label="Desfazer (Ctrl+Z)" onClick={undo}>
             <Undo2 />
           </ToolButton>
@@ -420,6 +483,12 @@ export default function App() {
                     "linear-gradient(to right, rgb(0 0 0 / 0.22) 1px, transparent 1px), linear-gradient(to bottom, rgb(0 0 0 / 0.22) 1px, transparent 1px)",
                   backgroundSize: `${zoom}px ${zoom}px`,
                 }}
+              />
+            )}
+            {sel && (
+              <div
+                className="pointer-events-none absolute border border-dashed border-white outline outline-black/70"
+                style={{ left: sel.x * zoom, top: sel.y * zoom, width: sel.w * zoom, height: sel.h * zoom }}
               />
             )}
           </div>
@@ -497,6 +566,11 @@ export default function App() {
         </span>
         <span>{zoom}x</span>
         <span>{cursor}</span>
+        {sel && (
+          <span>
+            seleção {sel.w}x{sel.h}
+          </span>
+        )}
       </footer>
       <Toaster position="bottom-center" richColors />
     </div>
