@@ -1,8 +1,9 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { ChevronDown, ChevronUp, FolderOpen, Images, Plus, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Film, FolderOpen, Images, Plus, X } from "lucide-react";
 import { toast } from "sonner";
+import { Thumb } from "@/components/Thumb";
 import { Button } from "@/components/ui/button";
 import type { Img } from "@/lib/pixels";
 import { PNG_FILTER, decodePng, encodePng, toImageData } from "@/lib/png";
@@ -22,7 +23,17 @@ const baseName = (path: string) => path.split(/[\\/]/).pop()!.replace(/\.png$/i,
 
 /** Builds a sprite sheet from PNG files and/or the current drawing, previews it and exports PNG (+ JSON).
  *  Stays mounted while hidden, so the list survives closing it to draw the next frame. */
-export function SpriteSheetDialog({ open: visible, current, onClose }: { open: boolean; current: () => Sprite; onClose: () => void }) {
+export function SpriteSheetDialog({
+  open: visible,
+  current,
+  allFrames,
+  onClose,
+}: {
+  open: boolean;
+  current: () => Sprite;
+  allFrames: () => Sprite[];
+  onClose: () => void;
+}) {
   const [sprites, setSprites] = useState<Sprite[]>([]);
   const [opts, setOpts] = useState<SheetOptions>({ columns: 4, spacing: 1, padding: 0, align: "bottom" });
   const [withJson, setWithJson] = useState(true);
@@ -119,6 +130,16 @@ export function SpriteSheetDialog({ open: visible, current, onClose }: { open: b
         <div className="flex min-h-0 flex-1">
           <aside className="flex w-64 shrink-0 flex-col gap-2 border-r p-3">
             <div className="grid grid-cols-2 gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                className="col-span-2"
+                title="Adiciona todos os frames da animação, em ordem"
+                onClick={() => setSprites((s) => [...s, ...allFrames()])}
+              >
+                <Film />
+                Todos os frames
+              </Button>
               <Button variant="outline" size="sm" onClick={addFiles}>
                 <FolderOpen />
                 PNGs
@@ -133,7 +154,7 @@ export function SpriteSheetDialog({ open: visible, current, onClose }: { open: b
               {sprites.map((s, i) => (
                 <li key={i} className="flex items-center gap-2 rounded-md px-1 py-0.5 hover:bg-muted">
                   <span className="w-4 text-right font-mono text-xs text-muted-foreground">{i}</span>
-                  <SpriteThumb img={s.img} />
+                  <Thumb img={s.img} />
                   <span className="min-w-0 flex-1 truncate" title={s.name}>
                     {s.name}
                     <span className="ml-1 font-mono text-xs text-muted-foreground">
@@ -199,22 +220,5 @@ export function SpriteSheetDialog({ open: visible, current, onClose }: { open: b
         </div>
       </div>
     </div>
-  );
-}
-
-function SpriteThumb({ img }: { img: Img }) {
-  const ref = useRef<HTMLCanvasElement>(null);
-  useLayoutEffect(() => ref.current?.getContext("2d")!.putImageData(toImageData(img), 0, 0), [img]);
-  // whole-number zoom for small sprites, shrink to fit for big ones
-  const side = Math.max(img.w, img.h);
-  const s = side <= 24 ? Math.floor(24 / side) : 24 / side;
-  return (
-    <canvas
-      ref={ref}
-      width={img.w}
-      height={img.h}
-      className="shrink-0 [image-rendering:pixelated]"
-      style={{ width: img.w * s, height: img.h * s, background: CHECKER }}
-    />
   );
 }

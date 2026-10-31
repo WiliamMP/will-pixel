@@ -29,6 +29,7 @@ import { toast } from "sonner";
 import { ColorPicker } from "@/components/ColorPicker";
 import { PalettePanel } from "@/components/PalettePanel";
 import { SpriteSheetDialog } from "@/components/SpriteSheetDialog";
+import { ONION_NEXT, ONION_PREV, Timeline } from "@/components/Timeline";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { WindowControls, dragWindow } from "@/components/WindowControls";
@@ -93,12 +94,35 @@ const MAX_SIDE = 256;
 // One checker cell per sprite pixel, so transparent areas still show the pixel size
 const CHECKER = "repeating-conic-gradient(#7d8294 0 25%, #9aa0b3 0 50%)";
 
+/** One undo step: the frame it belongs to and its image before the change */
+type Step = { frame: number; img: Img };
+
+/** Draws a frame tinted with one color, for the onion skin */
+function paintOnion(c: HTMLCanvasElement, f: Img, tint: string) {
+  const ctx = c.getContext("2d")!;
+  ctx.putImageData(toImageData(f), 0, 0);
+  ctx.globalCompositeOperation = "source-atop";
+  ctx.fillStyle = tint;
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.globalCompositeOperation = "source-over";
+}
+
 /** Zoom that makes the image about 480px on screen */
 const fitZoom = (img: Img) => Math.max(1, Math.floor(480 / Math.max(img.w, img.h)));
 
 export default function App() {
   const img = useRef<Img>(blank(16, 16));
   const [version, redraw] = useReducer((n: number) => n + 1, 0);
+  // Animation frames, all the same size. img.current is always frames.current[frameRef.current].
+  const frames = useRef<Img[]>([img.current]);
+  const frameRef = useRef(0);
+  const [frame, setFrame] = useState(0);
+  const [onion, setOnion] = useState(false);
+  const [onionRange, setOnionRange] = useState(1);
+  const onionCanvases = useRef(new Map<number, HTMLCanvasElement>());
+  const [playing, setPlaying] = useState(false);
+  const [fps, setFps] = useState(8);
+  const [playIndex, setPlayIndex] = useState(0);
   const [zoom, setZoom] = useState(() => fitZoom(img.current));
   const [tool, setTool] = useState<Tool>("pencil");
   const [color, setColor] = useState("#1a1626");
@@ -113,8 +137,8 @@ export default function App() {
   const [dirty, setDirty] = useState(false);
   const [cursor, setCursor] = useState("");
   const [sel, setSel] = useState<Rect | null>(null);
-  const past = useRef<Img[]>([]);
-  const future = useRef<Img[]>([]);
+  const past = useRef<Step[]>([]);
+  const future = useRef<Step[]>([]);
   // The stroke in progress: last pixel painted and its color
   const stroke = useRef<{ x: number; y: number; c: RGBA } | null>(null);
   // The move in progress: image before the drag, the area being moved and the pixel where it started.
@@ -133,26 +157,75 @@ export default function App() {
   // Repaint after every render: a sprite is a few KB, cheaper than tracking what changed
   useLayoutEffect(() => {
     const data = toImageData(img.current);
-    for (const c of [canvas.current, preview.current, previewBig.current, ...tiles.current])
-      c?.getContext("2d")!.putImageData(data, 0, 0);
+    for (const c of [canvas.current, ...tiles.current]) c?.getContext("2d")!.putImageData(data, 0, 0);
+    // While playing, the preview cycles through the frames
+    const shown = playing ? frames.current[playIndex % frames.current.length] : img.current;
+    for (const c of [preview.current, previewBig.current]) c?.getContext("2d")!.putImageData(toImageData(shown), 0, 0);
+    for (const [offset, c] of onionCanvases.current) {
+      const f = frames.current[frameRef.current + offset];
+      if (f) paintOnion(c, f, offset < 0 ? ONION_PREV : ONION_NEXT);
+    }
   });
 
+  useEffect(() => {
+    if (!playing) return;
+    const id = setInterval(() => setPlayIndex((i) => i + 1), 1000 / fps);
+    return () => clearInterval(id);
+  }, [playing, fps]);
+
+  /** Replaces the image of the current frame */
+  function setImg(next: Img) {
+    img.current = next;
+    frames.current[frameRef.current] = next;
+  }
+
+  function showFrame(i: number) {
+    frameRef.current = i;
+    img.current = frames.current[i];
+    setFrame(i);
+    redraw();
+  }
+
   function checkpoint() {
-    past.current.push(clone(img.current));
+    past.current.push({ frame: frameRef.current, img: clone(img.current) });
     if (past.current.length > HISTORY_MAX) past.current.shift();
     future.current = [];
     setDirty(true);
   }
 
-  function step(from: Img[], to: Img[]) {
+  // Undo jumps to the frame the step belongs to
+  function step(from: Step[], to: Step[]) {
     const prev = from.pop();
     if (!prev) return;
-    to.push(img.current);
-    if (prev.w !== img.current.w || prev.h !== img.current.h) setZoom(fitZoom(prev));
-    img.current = prev;
+    to.push({ frame: prev.frame, img: frames.current[prev.frame] });
+    frames.current[prev.frame] = prev.img;
+    showFrame(prev.frame);
     setDirty(true);
-    redraw();
   }
+
+  // ponytail: adding or deleting a frame clears the undo history, because its steps point at frame numbers;
+  // keep a history per frame if that gets in the way
+  function addFrame(copy: boolean) {
+    const at = frameRef.current + 1;
+    frames.current.splice(at, 0, copy ? clone(img.current) : blank(img.current.w, img.current.h));
+    past.current = [];
+    future.current = [];
+    setDirty(true);
+    showFrame(at);
+  }
+
+  async function deleteFrame() {
+    if (frames.current.length === 1) return;
+    const empty = img.current.data.every((v) => v === 0);
+    if (!empty && !(await ask("Excluir este frame? Não dá para desfazer.", { title: "will-pixel", kind: "warning" }))) return;
+    frames.current.splice(frameRef.current, 1);
+    past.current = [];
+    future.current = [];
+    setDirty(true);
+    showFrame(Math.min(frameRef.current, frames.current.length - 1));
+  }
+
+  const stepFrame = (d: number) => showFrame((frameRef.current + d + frames.current.length) % frames.current.length);
   const undo = () => step(past.current, future.current);
   /** What move, flip and delete act on: the selection, or the whole image when nothing is selected */
   const area = () => (sel && clampRect(sel, img.current)) ?? full(img.current);
@@ -228,7 +301,7 @@ export default function App() {
     }
     const d = drag.current;
     if (d) {
-      img.current = moveRect(d.base, d.rect, x - d.x, y - d.y);
+      setImg(moveRect(d.base, d.rect, x - d.x, y - d.y));
       if (sel) setSel({ ...d.rect, x: d.rect.x + x - d.x, y: d.rect.y + y - d.y });
       else redraw();
       return;
@@ -273,7 +346,11 @@ export default function App() {
   function load(next: Img, p: string | null) {
     past.current = [];
     future.current = [];
+    frames.current = [next];
+    frameRef.current = 0;
     img.current = next;
+    setFrame(0);
+    setPlaying(false);
     setSel(null);
     setZoom(fitZoom(next));
     setPath(p);
@@ -315,7 +392,7 @@ export default function App() {
 
   function applyImage(next: Img) {
     checkpoint();
-    img.current = next;
+    setImg(next);
     redraw();
   }
 
@@ -351,7 +428,7 @@ export default function App() {
       e.preventDefault();
       checkpoint();
       const r = area();
-      img.current = moveRect(img.current, r, ...arrow);
+      setImg(moveRect(img.current, r, ...arrow));
       if (sel) setSel(clampRect({ ...r, x: r.x + arrow[0], y: r.y + arrow[1] }, img.current));
       redraw();
       return;
@@ -364,6 +441,10 @@ export default function App() {
     }
     if (e.shiftKey && (k === "h" || k === "v")) return flipArea(k === "h");
     if (k === "t") return toggleTile();
+    if (k === "o") return setOnion((o) => !o);
+    if (k === ",") return stepFrame(-1);
+    if (k === ".") return stepFrame(1);
+    if (e.key === "Enter") return setPlaying((p) => !p);
     if (k === "s") return cycleSymmetry();
     const t = TOOLS.find((t) => t.key === k);
     if (t) setTool(t.id);
@@ -384,6 +465,10 @@ export default function App() {
   }, []);
 
   const { w, h } = img.current;
+  // Neighbor frames that exist, nearest first: -1, 1, -2, 2...
+  const onionOffsets = Array.from({ length: onionRange }, (_, i) => [-(i + 1), i + 1])
+    .flat()
+    .filter((o) => frames.current[frame + o]);
   /** One of the 8 repeated copies around the center in texture mode, repainted with the others.
    *  A plain function, not a component: the canvases keep their identity between renders. */
   const tileCopy = (index: number) => (
@@ -492,6 +577,20 @@ export default function App() {
             className={cn("relative shrink-0 shadow-lg", tile && "z-10 outline outline-primary/70")}
             style={{ width: w * zoom, height: h * zoom, background: CHECKER, backgroundSize: `${zoom * 2}px ${zoom * 2}px` }}
           >
+            {onion &&
+              onionOffsets.map((o) => (
+                <canvas
+                  key={o}
+                  ref={(c) => {
+                    if (c) onionCanvases.current.set(o, c);
+                    else onionCanvases.current.delete(o);
+                  }}
+                  width={w}
+                  height={h}
+                  className="pointer-events-none absolute inset-0 size-full [image-rendering:pixelated]"
+                  style={{ opacity: 0.5 / Math.abs(o) }}
+                />
+              ))}
             <canvas
               ref={canvas}
               width={w}
@@ -523,7 +622,6 @@ export default function App() {
                 style={{ left: sel.x * zoom, top: sel.y * zoom, width: sel.w * zoom, height: sel.h * zoom }}
               />
             )}
-            {/* Seams: red bars on both sides of each edge pixel that doesn't continue on the other side */}
             {/* Symmetry axes: what is drawn on one side is copied across these lines */}
             {(symmetry === "h" || symmetry === "both" || symmetry === "radial") && (
               <div className="pointer-events-none absolute inset-y-0 border-l border-dashed border-primary" style={{ left: (w * zoom) / 2 }} />
@@ -531,6 +629,7 @@ export default function App() {
             {(symmetry === "v" || symmetry === "both" || symmetry === "radial") && (
               <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-primary" style={{ top: (h * zoom) / 2 }} />
             )}
+            {/* Seams: red bars on both sides of each edge pixel that doesn't continue on the other side */}
             {report?.rows.flatMap((y) =>
               [-3, w * zoom].map((left) => (
                 <div key={`r${y}${left}`} className="pointer-events-none absolute w-[3px] bg-destructive" style={{ left, top: y * zoom, height: zoom }} />
@@ -580,11 +679,31 @@ export default function App() {
         </aside>
       </div>
 
+      <Timeline
+        frames={frames.current}
+        current={frame}
+        version={version}
+        onSelect={showFrame}
+        onAdd={addFrame}
+        onDelete={deleteFrame}
+        onion={onion}
+        onToggleOnion={() => setOnion((o) => !o)}
+        onionRange={onionRange}
+        onOnionRange={setOnionRange}
+        playing={playing}
+        onTogglePlay={() => setPlaying((p) => !p)}
+        fps={fps}
+        onFps={setFps}
+      />
+
       <footer className="flex h-6 shrink-0 items-center gap-3 border-t px-3 font-mono text-xs text-muted-foreground">
         <span>
           {w}x{h}
         </span>
         <span>{zoom}x</span>
+        <span>
+          frame {frame + 1}/{frames.current.length}
+        </span>
         <span>{cursor}</span>
         {sel && (
           <span>
@@ -596,6 +715,7 @@ export default function App() {
       <SpriteSheetDialog
         open={sheetOpen}
         current={() => ({ name: path ? path.split(/[\\/]/).pop()!.replace(/\.png$/i, "") : "desenho", img: clone(img.current) })}
+        allFrames={() => frames.current.map((f, i) => ({ name: `frame ${i + 1}`, img: clone(f) }))}
         onClose={() => setSheetOpen(false)}
       />
       <Toaster position="bottom-center" richColors />
